@@ -726,7 +726,7 @@ function viewTrain() {
   let install = '';
   if (!S.hideInstall && !isStandalone()) {
     if (deferredInstall) install = `<div class="glass card"><h2>Поставь на главный экран</h2><p class="muted small">Откроется как обычное приложение и будет работать без интернета.</p><div class="row" style="margin-top:12px"><button class="btn primary grow" data-act="install">Установить</button><button class="btn" data-act="hide-install">Позже</button></div></div>`;
-    else if (isIOS) install = `<div class="glass card"><h2>Поставь на экран «Домой»</h2><p class="muted small">В Safari нажми «Поделиться» внизу экрана, затем «На экран „Домой“». Тренажёр откроется как приложение и будет работать без интернета.</p><button class="btn sm" style="margin-top:12px" data-act="hide-install">Понятно</button></div>`;
+    else if (isIOS) install = `<div class="glass card"><h2>Поставь на экран «Домой»</h2><p class="muted small">В Safari открой меню рядом с адресом, выбери «Поделиться», затем «На экран „Домой“». Тренажёр откроется как приложение и будет работать без интернета.</p><button class="btn sm" style="margin-top:12px" data-act="hide-install">Понятно</button></div>`;
   }
   const key = getKey();
   return `<section class="view">
