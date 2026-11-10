@@ -188,7 +188,9 @@ html.ses-open .tabbar,html.ses-open #app{display:none}
 @keyframes pulse{50%{transform:scale(1.08);box-shadow:0 0 0 8px color-mix(in srgb,var(--accent) 16%,transparent)}}
 
 /* тренировка */
-.session{position:fixed;z-index:30;left:0;right:0;top:var(--vvt,0px);height:var(--vvh,100dvh);display:flex;flex-direction:column;animation:viewIn .45s var(--soft)}
+.session{position:fixed;z-index:30;left:0;right:0;top:0;bottom:0;display:flex;flex-direction:column;animation:viewIn .45s var(--soft)}
+/* клавиатура открыта: ужимаем экран до видимой области, чтобы поле и кнопка остались над клавиатурой */
+html.kb .session{top:var(--vvt,0px);bottom:auto;height:var(--vvh,100dvh)}
 .ses-top{flex:none;display:flex;align-items:center;gap:12px;padding:calc(env(safe-area-inset-top) + 10px) calc(16px + env(safe-area-inset-right)) 8px calc(16px + env(safe-area-inset-left));max-width:592px;width:100%;margin:0 auto}
 .iconbtn{flex:none;width:44px;height:44px;border-radius:50%;border:1px solid var(--stroke);background:var(--glass2);font-size:18px;display:grid;place-items:center;
   -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);transition:transform .4s var(--spring)}
