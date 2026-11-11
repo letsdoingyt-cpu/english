@@ -1,6 +1,6 @@
 'use strict';
 /* Грамматика — тренажёр английских времён. Без сборки: всё состояние в localStorage этого браузера. */
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 const SESSION_LEN = 10;
 const LS_MAIN = 'eg.v1', LS_KEY = 'eg.key', LS_GEN = 'eg.gen.v1';
 const GEM_HOST = 'https://generativelanguage.googleapis.com';
@@ -40,7 +40,7 @@ function lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e
 function lsDel(k) { try { localStorage.removeItem(k); } catch (e) { } }
 const DEF = () => ({
   v: 1,
-  settings: { theme: 'auto', autoSpeak: true, voice: '', rate: 0.85, model: DEFAULT_MODEL, useGen: true, apiForm: 0 },
+  settings: { theme: 'auto', autoSpeak: true, natural: true, voice: '', rate: 0.85, model: DEFAULT_MODEL, useGen: true, apiForm: 0 },
   stats: { total: { c: 0, t: 0 }, topic: {}, level: {}, mode: {}, days: {} },
   recent: {}, unlocked: {}, errs: {}, seen: {}, sent: [],
   last: { level: 'A1', topics: ['be'], mode: 'gap' }, hideInstall: false,
@@ -203,12 +203,59 @@ function pickVoice() {
 }
 let audioUnlocked = false;
 function unlockAudio() {
+  unlockPlayer();
   if (!TTS || audioUnlocked) return;
   audioUnlocked = true;
   try { speechSynthesis.speak(new SpeechSynthesisUtterance('')); } catch (e) { }
 }
+/* ---------- живой голос: заранее записанные фразы (audio/*.m4a) ---------- */
+const AUDIO = new Set((window.AUDIO_IDS || '').split(' ').filter(Boolean));
+const AUDIO_CACHE = 'grammar-audio-v1';
+const player = typeof Audio === 'function' ? new Audio() : null;
+const blobURLs = new Map();
+let playerUnlocked = false;
+function silentURL() {
+  const n = 800, b = new ArrayBuffer(44 + n), v = new DataView(b), w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, 'data'); v.setUint32(40, n, true);
+  new Uint8Array(b, 44).fill(128);
+  return URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+}
+// iPhone разрешает звук только после нажатия: «будим» плеер тишиной прямо в обработчике нажатия
+function unlockPlayer() {
+  if (!player || playerUnlocked) return;
+  playerUnlocked = true;
+  try { player.src = silentURL(); const p = player.play(); if (p && p.catch) p.catch(() => { playerUnlocked = false; }); } catch (e) { playerUnlocked = false; }
+}
+const hasVoice = text => !!player && S.settings.natural !== false && AUDIO.has(hash(text));
+async function audioURL(id) {
+  if (blobURLs.has(id)) return blobURLs.get(id);
+  const r = await fetch('audio/' + id + '.m4a');
+  if (!r.ok) throw new Error('audio ' + r.status);
+  const u = URL.createObjectURL(new Blob([await r.arrayBuffer()], { type: 'audio/mp4' }));
+  blobURLs.set(id, u);
+  if (blobURLs.size > 60) { const k = blobURLs.keys().next().value; URL.revokeObjectURL(blobURLs.get(k)); blobURLs.delete(k); }
+  return u;
+}
+const preload = text => { if (text && hasVoice(text)) audioURL(hash(text)).catch(() => { }); };
+const markSpeaking = (btn, on) => { $$('.speaking').forEach(b => b.classList.remove('speaking')); if (on && btn && btn.isConnected) btn.classList.add('speaking'); };
+function playRecorded(text, slow, btn) {
+  stopSpeak();
+  const my = ++speakSeq;
+  audioURL(hash(text)).then(u => {
+    if (my !== speakSeq) return;
+    const rate = slow ? 0.72 : (+S.settings.rate || 1);
+    player.onplaying = () => { if (my === speakSeq) markSpeaking(btn, true); };
+    player.onended = player.onpause = () => { if (my === speakSeq) markSpeaking(btn, false); };
+    player.src = u; player.defaultPlaybackRate = rate; player.playbackRate = rate;
+    try { player.preservesPitch = true; player.webkitPreservesPitch = true; } catch (e) { }
+    return player.play();
+  }).catch(() => { if (my === speakSeq) speak(text, slow, true, btn); });   // нет записи в кэше и нет сети → голос телефона
+}
 function speak(text, slow, retry, btn) {
-  if (!TTS || !text) return false;
+  if (!text) return false;
+  if (!retry && hasVoice(text)) { playRecorded(text, slow, btn); return true; }
+  if (!TTS) return false;
   try {
     audioUnlocked = true;
     const u = new SpeechSynthesisUtterance(text.replace(/[’‘]/g, "'"));
@@ -216,7 +263,7 @@ function speak(text, slow, retry, btn) {
     if (v) { u.voice = v; u.lang = v.lang; } else u.lang = 'en-US';
     u.rate = slow ? 0.7 : (+S.settings.rate || 0.85);
     let started = false;
-    const mark = on => { $$('.speaking').forEach(b => b.classList.remove('speaking')); if (on && btn && btn.isConnected) btn.classList.add('speaking'); };
+    const mark = on => markSpeaking(btn, on);
     u.onstart = () => { started = true; mark(true); };
     u.onend = () => mark(false);
     u.onerror = () => { started = true; mark(false); };
@@ -229,7 +276,7 @@ function speak(text, slow, retry, btn) {
   } catch (e) { return false; }
 }
 let speakSeq = 0;
-function stopSpeak() { speakSeq++; if (TTS) try { speechSynthesis.cancel(); } catch (e) { } $$('.speaking').forEach(b => b.classList.remove('speaking')); }
+function stopSpeak() { speakSeq++; if (TTS) try { speechSynthesis.cancel(); } catch (e) { } if (player) try { player.pause(); } catch (e) { } $$('.speaking').forEach(b => b.classList.remove('speaking')); }
 if (TTS) {
   loadVoices();
   try { speechSynthesis.addEventListener('voiceschanged', loadVoices); } catch (e) { speechSynthesis.onvoiceschanged = loadVoices; }
@@ -545,7 +592,7 @@ function renderTask() {
     hint = esc(it.ru);
   } else if (task.mode === 'tf') {
     task.shown = task.tfCorrect ? it.full : it.pre + it.wrong + it.post;
-    q = `<div class="qrow"><div class="q grow">${esc(task.shown)}</div>${spkBtn(task.shown)}</div>`;
+    q = `<div class="q">${esc(task.shown)}</div>`;
     hint = 'Предложение грамматически правильное?';
   } else if (task.mode === 'tr') {
     q = `<div class="q">${esc(it.ru)}</div>`;
@@ -581,6 +628,7 @@ function renderTask() {
     foot.innerHTML = `<div class="opts">${task.options.map((id, i) => `<button class="btn opt" data-opt="${i}"><span class="k">${i + 1}</span> ${esc(T[id].name)}</button>`).join('')}</div>`;
   }
   if (task.mode === 'listen') speak(it.full, false, false, $('.bigplay'));
+  else preload(w ? w.en[0] : it.full);
 }
 function sentenceHTML(it) { return esc(it.pre) + '<span class="hit">' + esc(it.alts[0]) + '</span>' + esc(it.post); }
 function whyHTML(it) {
@@ -715,7 +763,7 @@ function render() {
   const app = $('#app');
   app.innerHTML = ({ train: viewTrain, tenses: viewTenses, stats: viewStats, settings: viewSettings })[TAB]();
   $$('.tab').forEach((b, i) => { const on = b.dataset.tab === TAB; b.setAttribute('aria-selected', on); if (on) $('.tabbar').style.setProperty('--i', i); });
-  if (TAB === 'settings') { fillVoices(); loadVoices(); }
+  if (TAB === 'settings') { fillVoices(); loadVoices(); voiceOfflineInfo(); }
 }
 function viewTrain() {
   const st = S.stats, td = st.days[today()], s = streak(), acc = pct(st.total);
@@ -838,7 +886,11 @@ function viewSettings() {
   </div>
   <div class="glass card"><h2>Озвучка</h2>
     ${TTS ? `<label class="sw" style="margin-top:6px"><input type="checkbox" data-set="autoSpeak" ${st.autoSpeak ? 'checked' : ''}><i></i><span>Озвучивать правильный ответ</span></label>
-    <label class="lbl" for="voice-sel" style="margin-top:12px">Голос</label>
+    ${AUDIO.size ? `<label class="sw"><input type="checkbox" data-set="natural" ${st.natural !== false ? 'checked' : ''}><i></i><span>Живой голос диктора</span></label>
+    <p class="muted small" style="margin:2px 4px 0">Все встроенные фразы и слова записаны заранее нейросетевым диктором. Задания от Gemini читает голос телефона, выбранный ниже.</p>
+    <p class="small" id="voice-off" style="margin:10px 4px 0"></p>
+    <button class="btn sm" style="margin-top:8px" data-act="voice-dl">Скачать озвучку для офлайна · ${(window.AUDIO_BYTES / 1e6).toFixed(0)} МБ</button>` : ''}
+    <label class="lbl" for="voice-sel" style="margin-top:16px">Голос телефона (запасной)</label>
     <select id="voice-sel" class="field"></select>
     <label class="lbl" style="margin-top:16px">Скорость</label>
     <div class="seg" role="group" aria-label="Скорость">${[0.7, 0.85, 1].map(r => `<button data-rate="${r}" aria-pressed="${+st.rate === r}">${r === 1 ? '1.0' : r}</button>`).join('')}</div>
@@ -852,6 +904,20 @@ function viewSettings() {
   <div class="glass card"><h2>О тренажёре</h2>
     <p class="muted small" style="margin:0">Встроено заданий: ${Object.values(BY_ID).filter(i => i.src === 'stock').length}, от Gemini в кэше: ${GEN.length}, слов и фраз: ${LV.reduce((a, l) => a + WORDLIST[l].length, 0)}. После первого открытия работает без интернета.</p>
   </div></section>`;
+}
+async function voiceOfflineInfo() {
+  const el = $('#voice-off'); if (!el || !('caches' in window)) return;
+  try { const n = (await (await caches.open(AUDIO_CACHE)).keys()).length; if ($('#voice-off')) $('#voice-off').textContent = n >= AUDIO.size ? 'Вся озвучка сохранена — работает без интернета.' : `Без интернета доступно ${n} из ${AUDIO.size} записей. Остальные подгружаются по мере занятий.`; } catch (e) { }
+}
+async function downloadVoices(btn) {
+  if (navigator.onLine === false) return toast('Нет сети — скачать озвучку сейчас нельзя.');
+  const ids = [...AUDIO]; let done = 0, fail = 0; btn.disabled = true;
+  for (let i = 0; i < ids.length; i += 8) {
+    await Promise.all(ids.slice(i, i + 8).map(id => fetch('audio/' + id + '.m4a').then(r => { if (!r.ok) throw 0; return r.arrayBuffer(); }).then(() => { done++; }, () => { fail++; })));
+    if (btn.isConnected) btn.textContent = 'Скачиваю… ' + Math.round((i + 8) / ids.length * 100 > 100 ? 100 : (i + 8) / ids.length * 100) + ' %';
+  }
+  toast(fail ? `Скачано ${done}, не удалось ${fail}. Попробуй ещё раз при хорошей связи.` : 'Озвучка сохранена — теперь она работает без интернета.');
+  if (TAB === 'settings' && !SES) render();
 }
 function fillVoices() {
   const sel = $('#voice-sel'); if (!sel) return;
@@ -938,7 +1004,7 @@ function importData(file) {
 /* ---------- события ---------- */
 document.addEventListener('click', async e => {
   const say = e.target.closest('[data-say]');
-  if (say) { if (!speak(say.dataset.say, !!say.dataset.slow, false, say)) toast('Озвучка недоступна в этом браузере.'); if (SES && TYPED[cur() && cur().mode] && $('#ans')) $('#ans').focus({ preventScroll: true }); return; }
+  if (say) { unlockPlayer(); if (!speak(say.dataset.say, !!say.dataset.slow, false, say)) toast('Озвучка недоступна в этом браузере.'); if (SES && TYPED[cur() && cur().mode] && $('#ans')) $('#ans').focus({ preventScroll: true }); return; }
   const tab = e.target.closest('.tab'); if (tab) { TAB = tab.dataset.tab; render(); window.scrollTo(0, 0); return; }
   const opt = e.target.closest('[data-opt]'); if (opt) { if (SES) choose(+opt.dataset.opt); return; }
   const el = e.target.closest('[data-act],[data-level],[data-mode],[data-topic],[data-rand],[data-sheet],[data-theme-set],[data-rate]');
@@ -988,6 +1054,7 @@ document.addEventListener('click', async e => {
     case 'key-del':
       if (await confirmBox('Удалить ключ?', 'Ключ Gemini будет стёрт из этого браузера. Тренажёр продолжит работать на встроенном запасе.', 'Удалить', true)) { lsDel(LS_KEY); toast('Ключ удалён.'); render(); }
       return;
+    case 'voice-dl': return downloadVoices(el);
     case 'export': return exportData();
     case 'import': return $('#imp').click();
     case 'reset':
