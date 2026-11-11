@@ -250,7 +250,12 @@ function playRecorded(text, slow, btn) {
     player.src = u; player.defaultPlaybackRate = rate; player.playbackRate = rate;
     try { player.preservesPitch = true; player.webkitPreservesPitch = true; } catch (e) { }
     return player.play();
-  }).catch(() => { if (my === speakSeq) speak(text, slow, true, btn); });   // нет записи в кэше и нет сети → голос телефона
+  }).catch(err => {
+    if (my !== speakSeq) return;
+    // запись не скачалась (нет сети) или телефон не дал её включить → читает голос телефона
+    if (err && /NotAllowed|NotSupported/.test(err.name || '') && !playRecorded.told) { playRecorded.told = true; toast('Не получилось включить запись диктора — читаю голосом телефона.'); }
+    speak(text, slow, true, btn);
+  });
 }
 function speak(text, slow, retry, btn) {
   if (!text) return false;
